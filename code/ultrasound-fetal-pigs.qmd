@@ -1,0 +1,1207 @@
+---
+title: "Ultrasonographic monitoring of fetal growth and fetal weight calculation in pigs"
+author: "Anja Eggert"
+date: "12-December 2022" 
+editor: visual
+toc: true
+format: html
+code-fold: true
+---
+
+## Libraries
+
+```{r, warning=FALSE, echo=TRUE}
+library(kableExtra)  # nice html tables
+library(tidyverse)   # tidy-world
+library(patchwork)   # combine plots
+library(viridis)     # colour scale
+
+library(lmerTest)    # same as lme4, but with p values
+library(car)         # Type II SS -Anova()
+library(broom)       # tidy up output of model functions
+library(investr)     # predFit() prediction interval of nls model
+```
+
+```{r, echo = FALSE}
+my_theme = theme_bw() +
+  theme(axis.title = element_text(face="plain", size=10),
+        axis.text  = element_text(size=10, angle = 0, vjust = 0.5),
+        plot.title = element_text(face="bold", size=10))
+
+# Format of ggplot-title in grey box 
+element_textbox <- function(...) {
+  el <- element_text(...)
+  class(el) <- c("element_textbox", class(el))
+  el
+}
+
+element_grob.element_textbox <- function(element, ...) {
+  text_grob <- NextMethod()
+  rect_grob <- element_grob(calc_element("strip.background", theme_bw()))
+ 
+  ggplot2:::absoluteGrob(
+    grid::gList(
+      element_grob(calc_element("strip.background", theme_bw())),
+      text_grob
+    ),
+    height = grid::grobHeight(text_grob), 
+    width = grid::unit(1, "npc")
+  )
+}
+
+my_theme_f = my_theme +
+  theme(plot.title = element_textbox(
+    hjust = 0.5, margin = margin(t = 5, b = 5), size=10))
+```
+
+## Data
+
+### Read data
+
+- read in data from masterfile "ultrasound-fetal-pigs-data.csv"
+- calculate means from the two measurements given for each parameter
+
+```{r}
+ultra <- read_csv("./data/ultrasound-fetal-pigs-data.csv") %>% 
+  mutate(BPD = rowMeans(select(., c("BPD_1", "BPD_2")),
+                        na.rm = TRUE)) %>% 
+  mutate(CVD = rowMeans(select(., c("CVD_1", "CVD_2")),
+                        na.rm = TRUE)) %>%
+  mutate(ROL = rowMeans(select(., c("ROL_1", "ROL_2")),
+                        na.rm = TRUE)) %>%
+  mutate(AC  = rowMeans(select(., c("AC_1" , "AC_2" )),
+                        na.rm = TRUE)) %>%
+  mutate(ASD = rowMeans(select(., c("ASD_1", "ASD_2")),
+                        na.rm = TRUE)) %>%
+  mutate(ATD = rowMeans(select(., c("ATD_1", "ATD_2")),
+                        na.rm = TRUE)) %>%
+  mutate(HL  = rowMeans(select(., c("HL_1" , "HL_2" )),
+                        na.rm = TRUE)) %>%
+  dplyr::select(!ends_with(c("_1", "_2")))
+```
+
+### Summary per pregnancy day
+
+-   calculate medians and 95% percentiles for each variable
+
+```{r}
+ultra.perc <- ultra %>%
+  group_by(pregnancy.day) %>% 
+  summarise_at(vars(weight:HL), 
+               list(lwr = ~quantile(., probs = 0.05, na.rm = TRUE),
+                    upr = ~quantile(., probs = 0.95, na.rm = TRUE),
+                    med = ~quantile(., probs = 0.50, na.rm = TRUE)))
+```
+
+### Data tables for plots
+
+-   convert from wide to long data tables
+
+```{r}
+ultra.p <- ultra %>%
+  dplyr::select(pregnancy.day, weight:HL) %>% 
+  pivot_longer(!pregnancy.day,
+               names_to = "parameters",
+               values_to = "values") %>%
+  mutate_at(vars(parameters), 
+            ~as.factor(.)) 
+```
+
+```{r}
+ultra.perc.p <- ultra.perc %>%
+  pivot_longer(!pregnancy.day,
+  names_to = c("parameters", ".value"),
+  names_pattern = "(.+)_(.+)") %>% 
+  mutate_at(vars(parameters), 
+            ~as.factor(.)) 
+```
+
+## Fig. 2: Development of fetal weight and monitored anatomical structures during pregnancy
+
+-   Smooth curves were fitted using Loess, short for Local Regression
+
+```{r, warning=FALSE}
+p1 <- ultra.p %>% 
+  filter(parameters == "weight") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("weight")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("weight")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("weight")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  labs(x = "Day of pregnancy",
+       y = "Weight (g)",
+       title = "Fetal weight") +
+  my_theme_f +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+p2 <- ultra.p %>% 
+  filter(parameters == "ROL") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ROL")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ROL")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ROL")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 8.605),
+                     breaks = seq(0, 8, 2)) +
+  labs(x = "Day of pregnancy",
+       y = "ROD (cm)",
+       title = "Rostro-Occiptial Distance") +
+  my_theme_f +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+p3 <- ultra.p %>% 
+  filter(parameters == "BPD") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("BPD")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("BPD")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("BPD")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 4.005),
+                     breaks = seq(0, 4, 1)) +
+  labs(x = "Day of pregnancy",
+       y = "BPD (cm)",
+       title = "Biparietal Distance") +
+  my_theme_f +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+p4 <- ultra.p %>% 
+  filter(parameters == "CVD") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("CVD")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("CVD")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("CVD")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 1.62),
+                     breaks = seq(0, 1.6, 0.4)) +
+  labs(x = "Day of pregnancy",
+       y = "CVD (cm)",
+       title = "Corpus Vitreum Diameter") +
+  my_theme_f +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+p5 <- ultra.p %>% 
+  filter(parameters == "AC") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("AC")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("AC")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("AC")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 22.125),
+                     breaks = seq(0, 20, 5)) +
+  labs(x = "Day of pregnancy",
+       y = "AC (cm)",
+       title = "Abdominal Circumference") +
+  my_theme_f +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+p6 <- ultra.p %>% 
+  filter(parameters == "ASD") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ASD")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ASD")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ASD")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 8),
+                     breaks = seq(0, 8, 2)) +
+  labs(x = "Day of pregnancy",
+       y = "ASD (cm)",
+       title = "Abdominal Sagital Diameter") +
+  my_theme_f +
+  theme(axis.title.x = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank())
+
+p7 <- ultra.p %>% 
+  filter(parameters == "ATD") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ATD")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ATD")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("ATD")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 8),
+                     breaks = seq(0, 8, 2)) +
+  labs(x = "Day of pregnancy",
+       y = "ATD (cm)",
+       title = "Abdominal Transfersal Diameter") +
+  my_theme_f
+
+p8 <- ultra.p %>% 
+  filter(parameters == "HL") %>% 
+  ggplot(aes(x = pregnancy.day, y = values)) +
+  #geom_point(size = 1.0, col = "grey60", alpha = 0.3) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("HL")),
+              aes(x = pregnancy.day, y = med),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "solid", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("HL")),
+              aes(x = pregnancy.day, y = lwr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  geom_smooth(data = subset(ultra.perc.p,parameters %in% c("HL")),
+              aes(x = pregnancy.day, y = upr),
+              method = "loess", span = 1, se = FALSE,
+              col = "grey10", linetype = "dashed", size = 0.5) +
+  scale_x_continuous(limits = c(30, 100),
+                     breaks = seq(30, 100, 10)) +
+  scale_y_continuous(limits = c(0, 4),
+                     breaks = seq(0, 4, 1)) +
+  labs(x = "Day of pregnancy",
+       y = "HL (cm)",
+       title = "Heart Length") +
+  my_theme_f
+
+patchwork <- p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8
+```
+
+```{r, warning=FALSE, fig.height=10, out.width="100%"}
+patchwork +
+  plot_layout(ncol = 2)
+```
+
+## Fig. 3: Relationships between all examined morphological parameters and fetal weight
+
+### Data wrangling
+
+-   preparing long data frame
+
+```{r}
+ultra.p1 <- ultra %>%
+  dplyr::select(pregnancy.day, weight:HL) %>% 
+  pivot_longer(cols = -c(pregnancy.day,weight),
+               names_to = "parameters",
+               values_to = "values") %>%
+  mutate_at(vars(parameters), 
+            ~as.factor(.))
+```
+
+### Model estimates of linear regression per pregnday
+
+-   run a linear model for each parameter and each day of pregnancy separately
+-   use the functions of the `broom` package to extract with `tidy()` to extract the coefficients, `glance()` to extract summary statistics and `augment()` to extract fitted values and residuals
+
+```{r}
+all.lm.tidy <- ultra.p1 %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(parameters, pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::tidy(lm(weight ~ values, data = .x))) %>%
+  ungroup()
+
+all.lm.tidy %>% 
+  kable(caption = "Estimated coefficients of lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+```{r}
+all.lm.glance <- ultra.p1 %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(parameters, pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::glance(lm(weight ~ values, data = .x))) %>% 
+  ungroup()
+
+all.lm.glance %>% 
+  kable(caption = "Summary statistics of lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+```{r}
+all.lm.augment <- ultra.p1 %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(parameters, pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::augment(lm(weight ~ values, data = .x))) %>% 
+  ungroup()
+
+all.lm.augment %>% 
+  kable(caption = "Fitted values and residuals of lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+-   characterizing goodness of fit of the linear model
+
+```{r}
+all.rmse <- all.lm.augment %>% 
+  group_by(parameters, pregnancy.day) %>%
+  summarize(RMSE = sqrt(mean(.resid^2)))
+
+all.rmse %>% 
+  kable(caption = "RMSE of lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "300px", height = "500px")
+```
+
+### Prediction bands of linear regressions
+
+-   calculate 95% prediction interval: `predict(lm(weight ~ values, data = .x), interval = "prediction")`
+
+```{r, warning=FALSE}
+rol.pred <- ultra.p1 %>%
+  filter(parameters == "ROL") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "ROL")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+
+bpd.pred <- ultra.p1 %>%
+  filter(parameters == "BPD") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "BPD")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+
+cvd.pred <- ultra.p1 %>%
+  filter(parameters == "CVD") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "CVD")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+
+ac.pred <- ultra.p1 %>%
+  filter(parameters == "AC") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "AC")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+
+asd.pred <- ultra.p1 %>%
+  filter(parameters == "ASD") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "ASD")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+
+atd.pred <- ultra.p1 %>%
+  filter(parameters == "ATD") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "ATD")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+
+hl.pred <- ultra.p1 %>%
+  filter(parameters == "HL") %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  group_map(~predict(lm(weight ~ values, data = .x),
+                     interval = "prediction")) %>%
+  map_dfr(as_tibble, .name_repair = "universal") %>%
+  bind_cols(ultra.p1 %>%
+              drop_na(values) %>%
+              filter(parameters == "HL")) %>%
+  mutate_at(vars(pregnancy.day),
+            ~as.factor(.))
+```
+
+### Plots with linear regression per pregnday
+
+-   plot including linear regression lines for each day of pregnancy separately, using `geom_smooth()`
+-   calculated prediction intervals (lower and upper) added to the plots
+
+```{r, warning=FALSE}
+p2 <- ultra.p1 %>% 
+  filter(parameters == "ROL") %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  ggplot(aes(x = values, y = weight, col = pregnancy.day)) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = rol.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = rol.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 8.605),
+                     breaks = seq(0, 8, 2)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                             label.position = "bottom",
+                             nrow = 1)) +
+  labs(x = "ROD (cm)",
+       y = "Fetal weight (g)",
+       title = "Rostro-Occipital Distance") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+
+p3 <- ultra.p1 %>% 
+  filter(parameters == "BPD") %>% 
+  ggplot(aes(x = values, y = weight, col = factor(pregnancy.day))) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = bpd.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = bpd.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 4.005),
+                     breaks = seq(0, 4, 1)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                             label.position = "bottom",
+                             nrow = 1)) +
+  labs(x = "BPD (cm)",
+       y = "Fetal weight (g)",
+       title = "Biparietal Distance") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+
+p4 <- ultra.p1 %>% 
+  filter(parameters == "CVD") %>% 
+  ggplot(aes(x = values, y = weight, col = factor(pregnancy.day))) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = cvd.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = cvd.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 1.62),
+                     breaks = seq(0, 1.6, 0.4)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                             label.position = "bottom",
+                             nrow = 1)) +
+  labs(x = "CVD (cm)",
+       y = "Fetal weight (g)",
+       title = "Corpus Vitreum Diameter") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3))) +
+  theme(axis.title.y = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.ticks.y = element_blank())
+
+p5 <- ultra.p1 %>% 
+  filter(parameters == "AC") %>% 
+  ggplot(aes(x = values, y = weight, col = factor(pregnancy.day))) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = ac.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = ac.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 22.125),
+                     breaks = seq(0, 20, 5)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                            label.position = "bottom",
+                            nrow = 1)) +
+  labs(x = "AC (cm)",
+       y = "Fetal weight (g)",
+       title = "Abdominal Circumference") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+
+p6 <- ultra.p1 %>% 
+  filter(parameters == "ASD") %>% 
+  ggplot(aes(x = values, y = weight, col = factor(pregnancy.day))) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = asd.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = asd.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 8),
+                     breaks = seq(0, 8, 2)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                             label.position = "bottom",
+                             nrow = 1)) +
+  labs(x = "ASD (cm)",
+       y = "Fetal weight (g)",
+       title = "Abdominal Sagital Diameter") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3))) +
+  theme(axis.title.y = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.ticks.y = element_blank())
+
+p7 <- ultra.p1 %>% 
+  filter(parameters == "ATD") %>% 
+  ggplot(aes(x = values, y = weight, col = factor(pregnancy.day))) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = atd.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = atd.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 8),
+                     breaks = seq(0, 8, 2)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                            label.position = "bottom",
+                            nrow = 1)) +
+  labs(x = "ATD (cm)",
+       y = "Fetal weight (g)",
+       title = "Abdominal Transfersal Diameter") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+
+p8 <- ultra.p1 %>% 
+  filter(parameters == "HL") %>% 
+  ggplot(aes(x = values, y = weight, col = factor(pregnancy.day))) +
+  geom_point(size = 1.0, alpha = 0.6) +
+  # add regression lines for each pregn day separately
+  geom_smooth(method = "lm",
+              se = FALSE,
+              show.legend = FALSE) +
+  #lwr pred interval
+  geom_line(data = hl.pred,
+            aes(y = lwr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  #upr pred interval
+  geom_line(data = hl.pred,
+            aes(y = upr, group = pregnancy.day),
+            linetype = "dashed",
+            show.legend = FALSE) + 
+  scale_x_continuous(limits = c(0, 4),
+                     breaks = seq(0, 4, 1)) +
+  scale_y_continuous(limits = c(0, 840),
+                     breaks = seq(0, 800, 200)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  guides(col = guide_legend(title.position = "top",
+                             label.position = "bottom",
+                             nrow = 1)) +
+  labs(x = "HL (cm)",
+       y = "Fetal weight (g)",
+       title = "Heart Length") +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3))) +
+  theme(axis.title.y = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.ticks.y = element_blank())
+
+patchwork <- guide_area() + p2 + p3 + p4 + p5 + p6 + p7 + p8
+```
+
+```{r, warning=FALSE, fig.height=10, out.width="100%"}
+patchwork +
+  plot_layout(ncol = 2,
+              guides = 'collect')
+```
+
+## Tab. 2: Linear mixed model testing for effects of all measured morphometric parameters
+
+-   we use now a more complex model to estimate effects of the single measured parameters (`BPD`, `CVD`, `ROL`, `AC`, `ASD`, `ATD`, `HL`) and `pregnancy.day` on fetus `weight`
+
+-   all these parameters are treated as fixed, continuous predictors (covariates)
+
+-   in addition, we have a nested structure in the data, 10 to 17`foetus` per `sow` were measured
+
+### Data wrangling
+
+-   `foetus` and `sow` need to be factors and `foetus` needs to be changed into unique id
+
+```{r}
+ultra <- ultra %>% 
+  mutate(foetus = paste(sow, foetus, sep = "-")) %>% 
+  mutate_at(vars(sow, foetus), 
+            ~as.factor(.))
+```
+
+### Run linear mixed model
+
+```{r}
+contr = lmerControl(optimizer= "bobyqa", 
+                    optCtrl = list(maxfun = 10000000), 
+                    calc.derivs = FALSE)
+
+mfull.ultra = lmerTest::lmer(log(weight) ~
+                           # fixed effects 
+                           BPD +
+                           CVD +
+                           ROL +
+                           AC  +
+                           ASD +
+                           ATD +
+                           HL  +
+                           pregnancy.day +
+                           #random effects
+                           (1|sow),
+                         #data set
+                         data = ultra,
+                         # final model set REML = TRUE
+                         REML = TRUE,
+                         control = contr)
+```
+
+### Model summary
+
+-   model summary, includes fixed effects (incl. *p* values as package `lmerTest` is used) and random effects
+
+```{r}
+summary(mfull.ultra)
+```
+
+-   using `Anova()` of the `car` package to get the type II F-values of the fixed effects
+
+```{r}
+car::Anova(mfull.ultra, type = "II", test.statistic = "F")
+```
+
+
+## Tab. 3: Multiple linear regression models with either three (ROD, BPD, AC) independent morphometric parameters
+
+### Multiple regression: BPD, AC, ROL
+
+-   fit multiple regression, i.e. linear model with only using the main predictors BPD, AC, ROL
+
+```{r}
+mult3.lm.tidy <- ultra %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::tidy(lm(weight ~ BPD + ROL + AC, data = .x))) %>%
+  ungroup()
+
+mult3.lm.tidy %>% 
+  kable(caption = "Estimated coefficients of mult3.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+```{r}
+mult3.lm.glance <- ultra %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::glance(lm(weight ~ BPD + ROL + AC, data = .x))) %>% 
+  ungroup()
+
+mult3.lm.glance %>% 
+  kable(caption = "Summary statistics of mult3.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+```{r}
+mult3.lm.augment <- ultra %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::augment(lm(weight ~ BPD + ROL + AC, data = .x))) %>% 
+  ungroup()
+
+mult3.lm.augment %>% 
+  kable(caption = "Fitted values and residuals of mult3.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+-   goodness of fit of the linear model
+
+```{r}
+mult3.lm.rmse <- mult3.lm.augment %>% 
+  group_by(pregnancy.day) %>%
+  summarize(RMSE = sqrt(mean(.resid^2)))
+
+mult3.lm.rmse %>% 
+  kable(caption = "RMSE of mult3.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "300px", height = "500px")
+```
+
+### Multiple regression: BPD, AC
+
+-   fit multiple regression, i.e. linear model with only using the two main predictors BPD, AC
+
+```{r}
+mult2.lm.tidy <- ultra %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::tidy(lm(weight ~ BPD + AC, data = .x))) %>%
+  ungroup()
+
+mult2.lm.tidy %>% 
+  kable(caption = "Estimated coefficients of mult2.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+```{r}
+mult2.lm.glance <- ultra %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::glance(lm(weight ~ BPD + AC, data = .x))) %>% 
+  ungroup()
+
+mult2.lm.glance %>% 
+  kable(caption = "Summary statistics of mult2.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+```{r}
+mult2.lm.augment <- ultra %>% 
+  mutate_at(vars(pregnancy.day), 
+            ~as.factor(.)) %>%
+  group_by(pregnancy.day) %>%
+  # group_modify to get a restructured grouped tibble
+  group_modify(~ broom::augment(lm(weight ~ BPD + AC, data = .x))) %>% 
+  ungroup()
+
+mult2.lm.augment %>% 
+  kable(caption = "Fitted values and residuals of mult2.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "800px", height = "500px")
+```
+
+-   goodness of fit of the linear model
+
+```{r}
+mult2.lm.rmse <- mult2.lm.augment %>% 
+  group_by(pregnancy.day) %>%
+  summarize(RMSE = sqrt(mean(.resid^2)))
+
+mult2.lm.rmse %>% 
+  kable(caption = "RMSE of mult2.lm()") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), 
+                font_size = 10) %>% 
+  scroll_box(width = "300px", height = "500px")
+```
+
+## Fig. 4: Nonlinear, least squares regression models
+
+### Merz(1988)
+
+-   define a function according to Merz (1988) and plug it into the `nls()` function to estimate a
+
+-   apply the function `predFit()` from the `investr` package to calculate prediction interval
+
+```{r}
+merz.1988 <- function(x, a) {
+  a * x^3
+  }
+```
+
+### nls: AC, BPD, ROL
+
+-   AC: estimated factor **a = 0.077** and **RSE = 33.23**
+
+```{r}
+ac.merz.1988 <- nls(weight ~ merz.1988(AC, a),
+                    data      = ultra,
+                    start     = list(a = 1),
+                    trace     = TRUE)
+
+summary(ac.merz.1988)
+broom::tidy(ac.merz.1988)
+broom::glance(ac.merz.1988)
+```
+
+```{r}
+new.data <- data.frame(AC = seq(min(ultra$AC),
+                                max(ultra$AC),
+                                by = 0.1))
+
+interval <- as_tibble(investr::predFit(ac.merz.1988, 
+                                       newdata = new.data,
+                                       interval = "prediction", 
+                                       level= 0.95)) %>% 
+  mutate(lwr = replace(lwr, which(lwr<0), 0)) %>% 
+  mutate(upr = replace(upr, which(upr<0), 0)) %>% 
+  mutate(AC = new.data$AC)
+
+p.ac <- ggplot(ultra, aes(x=AC, y=weight)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  geom_ribbon(data=interval, aes(x=AC, ymin=lwr, ymax=upr),
+              inherit.aes=FALSE,
+              alpha=0.8, fill="grey80")+
+  geom_point(size = 1.0, aes(col = factor(pregnancy.day))) +
+  geom_line(data=interval, 
+            aes(x = AC, y = fit ), 
+            col = "grey50", size =1)+
+  scale_x_continuous(limits = c(0, 22.125),
+                     breaks = seq(0, 20, 5)) +
+  scale_y_continuous(limits = c(0, 910),
+                     breaks = seq(0, 800, 200)) +
+  labs(x = "AC (cm)",
+       y = "Fetal weight (g)",
+       title = "Abdominal circumference") +
+  annotate("text", x = 0, y = 800,
+           label = bquote('EFW = 0.077' %.% ~AC[cm]^{"3"}),
+           color = "black", hjust = 0, vjust = 0, size = 10/.pt) +
+  annotate("text", x = 0, y = 700,
+           label = bquote('RSE = 33.23'),
+           color = "black", hjust = 0, vjust = 0, size = 10/.pt) +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+```
+
+-   BPD: estimated factor **a = 12.2** and **RSE = 71.03**
+
+```{r}
+bpd.merz.1988 <- nls(weight ~ merz.1988(BPD, a),
+                    data  = ultra,
+                    start = list(a = 1),
+                    trace = TRUE)
+
+broom::tidy(bpd.merz.1988)
+broom::glance(bpd.merz.1988)
+```
+
+```{r}
+new.data <- data.frame(BPD = seq(min(ultra$BPD),
+                                 max(ultra$BPD),
+                                 by = 0.1))
+
+interval <- as_tibble(investr::predFit(bpd.merz.1988, 
+                                       newdata = new.data,
+                                       interval = "prediction", 
+                                       level= 0.95)) %>% 
+  mutate(lwr = replace(lwr, which(lwr<0), 0)) %>% 
+  mutate(upr = replace(upr, which(upr<0), 0)) %>% 
+  mutate(BPD = new.data$BPD)
+ 
+
+p.bpd <- ggplot(ultra, aes(x=BPD, y=weight)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  geom_ribbon(data=interval, aes(x=BPD, ymin=lwr, ymax=upr),
+              inherit.aes=FALSE,
+              alpha=0.8, fill="grey80")+
+  geom_point(size = 1.0, aes(col = factor(pregnancy.day))) +
+  geom_line(data = interval, 
+            aes(x = BPD, y = fit ), 
+            col = "grey50", size =1)+
+  scale_x_continuous(limits = c(0, 4.005),
+                     breaks = seq(0, 4, 1)) +
+  scale_y_continuous(limits = c(0, 910),
+                     breaks = seq(0, 800, 200)) +
+  labs(x = "BPD (cm)",
+       y = "Fetal weight (g)",
+       title = "Biparietal Distance") +
+  annotate("text", x = 0, y = 800,
+           label = bquote('EFW = 12.228' %.% ~BPD[cm]^{"3"}),
+           color = "black", hjust = 0, vjust = 0, size = 10/.pt) +
+  annotate("text", x = 0, y = 700,
+           label = bquote('RSE = 71.03'),
+           color = "black", hjust = 0, vjust = 0, size = 10/.pt) +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+```
+
+-   ROL: estimated factor **a = 1.2** and **RSE = 45.66**
+
+```{r}
+rol.merz.1988 <- nls(weight ~ merz.1988(ROL, a),
+                    data  = ultra,
+                    start = list(a = 1),
+                    trace = TRUE)
+
+broom::tidy(rol.merz.1988)
+broom::glance(rol.merz.1988)
+```
+
+```{r}
+new.data <- data.frame(ROL = seq(min(ultra$ROL),
+                                 max(ultra$ROL),
+                                 by = 0.1))
+
+interval <- as_tibble(investr::predFit(rol.merz.1988, 
+                                       newdata = new.data,
+                                       interval = "prediction", 
+                                       level= 0.95)) %>% 
+  mutate(lwr = replace(lwr, which(lwr<0), 0)) %>% 
+  mutate(upr = replace(upr, which(upr<0), 0)) %>% 
+  mutate(ROL = new.data$ROL)
+
+p.rol <- ggplot(ultra, aes(x=ROL, y=weight)) +
+  scale_color_viridis(discrete = TRUE, option = "D",
+                      labels = c("36", "50", "64",
+                                 "79", "92"),
+                      name = "Day of pregnancy") +
+  geom_ribbon(data=interval, aes(x=ROL, ymin=lwr, ymax=upr),
+              inherit.aes=FALSE,
+              alpha=0.8, fill="grey80")+
+  geom_point(size = 1.0, aes(col = factor(pregnancy.day))) +
+  geom_line(data=interval, 
+            aes(x = ROL, y = fit ), 
+            col = "grey50", size =1)+
+  scale_x_continuous(limits = c(0, 8.605),
+                     breaks = seq(0, 8, 2)) +
+  scale_y_continuous(limits = c(0, 910),
+                     breaks = seq(0, 800, 200)) +
+  labs(x = "ROD (cm)",
+       y = "Fetal weight [g]",
+       title = "Rostro-Occipital Distance") +
+  annotate("text", x = 0, y = 800,
+           label = bquote('EFW = 1.199' %.% ~ROD[cm]^{"3"}),
+           color = "black", hjust = 0, vjust = 0, size = 10/.pt) +
+  annotate("text", x = 0, y = 700,
+           label = bquote('RSE = 45.66'),
+           color = "black", hjust = 0, vjust = 0, size = 10/.pt) +
+  my_theme_f +
+  # make larger symbols in legend
+  guides(color = guide_legend(override.aes = list(size = 3)))
+```
+
+```{r}
+patchwork <- p.ac / p.bpd / p.rol
+```
+
+```{r, fig.height=20, fig.width=10, warning=FALSE}
+patchwork +
+  plot_layout(ncol = 1,
+              guides = 'collect') &
+  theme(legend.position = 'bottom')
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
