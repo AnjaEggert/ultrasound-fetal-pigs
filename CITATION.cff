@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: Vernunft
+  given-names: Andreas
+  orcid: https://orcid.org/0000-0001-8147-319X
+- family-names: Eggert
+  given-names: Anja
+  orcid: https://orcid.org/0000-0003-3893-6851
+- family-names: Brüssow
+  given-names: Klaus-Peter
+  orcid: https://orcid.org/0000-0002-4345-2627
+title: "ultrasound-fetal-pigs"
+version: 1.0.0
+doi: 10.5281/zenodo.1234
+date-released: 2022-12-13
+url: "https://github.com/AnjaEggert/ultrasound-fetal-pigs"
