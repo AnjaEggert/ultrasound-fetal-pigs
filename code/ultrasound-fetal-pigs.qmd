@@ -58,11 +58,11 @@ my_theme_f = my_theme +
 
 ### Read data
 
-- read in data from masterfile "ultrasound-fetal-pigs-data.csv"
-- calculate means from the two measurements given for each parameter
+-   read in data from masterfile "ultrasound-fetal-pigs-data.csv"
+-   calculate means from the two measurements given for each parameter
 
 ```{r}
-ultra <- read_csv("./data/ultrasound-fetal-pigs-data.csv") %>% 
+ultra <- read_csv("../data/ultrasound-fetal-pigs-data.csv") %>% 
   mutate(BPD = rowMeans(select(., c("BPD_1", "BPD_2")),
                         na.rm = TRUE)) %>% 
   mutate(CVD = rowMeans(select(., c("CVD_1", "CVD_2")),
@@ -870,7 +870,6 @@ summary(mfull.ultra)
 ```{r}
 car::Anova(mfull.ultra, type = "II", test.statistic = "F")
 ```
-
 
 ## Tab. 3: Multiple linear regression models with either three (ROD, BPD, AC) independent morphometric parameters
 
